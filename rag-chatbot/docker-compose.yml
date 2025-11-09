@@ -1,0 +1,39 @@
+version: "3.8"
+
+services:
+  rag-chatbot:
+    build: .
+    container_name: rag_chatbot_app
+    ports:
+      - "8501:8501"
+    volumes:
+      - .:/app
+    environment:
+      - TOGETHER_API_KEY=${TOGETHER_API_KEY}
+      - CHROMA_HOST=chroma
+      - CHROMA_PORT=8000
+    depends_on:
+      - chroma
+      - ollama
+
+  chroma:
+    image: ghcr.io/chroma-core/chroma:latest
+    container_name: chromadb
+    volumes:
+      - chroma-data:/chroma
+    ports:
+      - "8000:8000"
+    command: ["run", "--host", "0.0.0.0", "--path", "/chroma"]
+
+  ollama:
+    image: ollama/ollama
+    container_name: ollama
+    volumes:
+      - ollama-data:/root/.ollama
+    ports:
+      - "11434:11434"
+    restart: unless-stopped
+
+volumes:
+  chroma-data:
+  ollama-data:
