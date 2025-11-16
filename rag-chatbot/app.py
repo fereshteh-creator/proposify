@@ -1,24 +1,25 @@
-import streamlit as st
+# app.py
+
 import os
-import requests
-import chromadb
-from dotenv import load_dotenv
-import time
 import re
+from typing import Any, Dict, List
+
+import streamlit as st
+from dotenv import load_dotenv
+from langfuse.langchain import CallbackHandler as LangfuseCallbackHandler
+
+from prompts import MODE_INSTR, PERSONA_MAP  # optional, for future UI use
+from rag_tools import summarize_uploaded_papers, llm_complete
+from graph_config import AppState, rag_graph
+from proposal_graph_config import ProposalState, proposal_graph #anna
+
+# -------- env + Langfuse -------- #
 
 load_dotenv()
 
-TOGETHER_API_KEY = os.getenv("TOGETHER_API_KEY")
-assert TOGETHER_API_KEY, "Bitte TOGETHER_API_KEY als Umgebungsvariable setzen."
+LANGFUSE_HANDLER = LangfuseCallbackHandler()
 
-MIXTRAL_MODEL = os.getenv("LLM_MODEL", "mistralai/Mixtral-8x7B-Instruct-v0.1")
-EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "nomic-embed-text")
-EMBEDDING_URL = os.getenv("EMBEDDING_URL", "http://ollama:11434/api/embeddings")
-OLLAMA_BASE = os.getenv("OLLAMA_BASE", "http://ollama:11434")
-EMBED_FALLBACKS = [m.strip() for m in os.getenv("EMBED_FALLBACKS", "mxbai-embed-large,all-minilm").split(",") if m.strip()]
-CHROMA_HOST = os.getenv("CHROMA_HOST", "chroma")
-CHROMA_PORT = int(os.getenv("CHROMA_PORT", "8000"))
-CHROMA_COLLECTION = os.getenv("CHROMA_COLLECTION", "gesetzestexte")
+# -------- Streamlit setup -------- #
 
 st.set_page_config(page_title="Proposify", layout="wide")
 col1, col2 = st.columns([1, 1])
@@ -27,8 +28,10 @@ with col1:
 with col2:
     st.markdown(" ")
 
+# -------- session state -------- #
+
 if "history" not in st.session_state:
-    st.session_state.history = []
+    st.session_state.history: List[Dict[str, Any]] = []
 if "summary" not in st.session_state:
     st.session_state.summary = ""
 if "recent_sources" not in st.session_state:
@@ -37,25 +40,29 @@ if "mode" not in st.session_state:
     st.session_state.mode = "Research question helper"
 if "persona" not in st.session_state:
     st.session_state.persona = "Helper"
+if "upload_collection_name" not in st.session_state:
+    import uuid
+    # kept for backward compatibility / tracing
+    st.session_state.upload_collection_name = f"user_uploads_{uuid.uuid4().hex[:8]}"
+# NEW: store summaries of uploaded papers
+if "paper_summaries" not in st.session_state:
+    st.session_state.paper_summaries: Dict[str, str] = {}
+if "summarized_paper_count" not in st.session_state:
+    st.session_state.summarized_paper_count = 0
+if "last_task" not in st.session_state:
+    st.session_state.last_task = "(none)"
 
-def llm_complete(prompt: str, max_tokens: int = 1024, temperature: float = 0.2) -> str:
-    resp = requests.post(
-        "https://api.together.xyz/v1/completions",
-        headers={"Authorization": f"Bearer {TOGETHER_API_KEY}"},
-        json={
-            "model": MIXTRAL_MODEL,
-            "prompt": prompt,
-            "max_tokens": max_tokens,
-            "temperature": temperature,
-        },
-        timeout=60,
-    )
-    if resp.status_code != 200:
-        raise RuntimeError(f"LLM error: {resp.status_code} — {resp.text}")
-    return resp.json().get("choices", [{}])[0].get("text", "").strip()
+# -------- summary utils -------- #
 
-SELF_REF_RE = re.compile(r"\[Self-Reflection Checklist\].*?(?:\Z|\n{2,})", re.IGNORECASE | re.DOTALL)
-PROMPTY_RE = re.compile(r"\[Write (?:the )?updated summary below\]\s*", re.IGNORECASE)
+SELF_REF_RE = re.compile(
+    r"\[Self-Reflection Checklist\].*?(?:\Z|\n{2,})",
+    re.IGNORECASE | re.DOTALL,
+)
+PROMPTY_RE = re.compile(
+    r"\[Write (?:the )?updated summary below\]\s*",
+    re.IGNORECASE,
+)
+
 
 def _clean_text(text: str) -> str:
     if not text:
@@ -65,7 +72,8 @@ def _clean_text(text: str) -> str:
     text = re.sub(r"\n{3,}", "\n\n", text).strip()
     return text
 
-def update_summary_ephemeral(history, current_summary):
+
+def update_summary_ephemeral(history, current_summary: str) -> str:
     chat_turns = [h for h in history if h.get("kind", "chat") == "chat"]
     pairs = []
     for item in chat_turns:
@@ -96,125 +104,145 @@ Rules:
     except Exception:
         return current_summary
 
-def ollama_pull(model_name: str):
-    try:
-        r = requests.post(f"{OLLAMA_BASE}/api/pull", json={"name": model_name}, timeout=600)
-        return r.status_code, r.text
-    except Exception as e:
-        return 0, str(e)
 
-def ensure_embedding_model(model_name: str) -> str:
-    status, _ = ollama_pull(model_name)
-    if status in (200, 201):
-        return model_name
-    for alt in EMBED_FALLBACKS:
-        s2, _ = ollama_pull(alt)
-        if s2 in (200, 201):
-            return alt
-    return model_name
+# -------- wrapper: call LangGraph -------- #
 
-def embed_text_ollama(text: str):
-    global EMBEDDING_MODEL
-    def _embed(model):
-        r = requests.post(EMBEDDING_URL, json={"model": model, "prompt": text}, timeout=120)
-        return r
-    r = _embed(EMBEDDING_MODEL)
-    if r.status_code == 200:
-        return r.json().get("embedding")
-    if r.status_code == 404 and "not found" in r.text.lower():
-        chosen = ensure_embedding_model(EMBEDDING_MODEL)
-        r2 = _embed(chosen)
-        if r2.status_code == 200:
-            EMBEDDING_MODEL = chosen
-            return r2.json().get("embedding")
-        for alt in EMBED_FALLBACKS:
-            r3 = _embed(alt)
-            if r3.status_code == 200:
-                EMBEDDING_MODEL = alt
-                return r3.json().get("embedding")
-    raise RuntimeError(f"Embedding error: {r.status_code} — {r.text}")
-
-def chroma_client_retry(max_attempts=10, delay=2.0):
-    for attempt in range(max_attempts):
-        try:
-            client = chromadb.HttpClient(host=CHROMA_HOST, port=CHROMA_PORT)
-            client.heartbeat()
-            return client
-        except Exception:
-            if attempt == max_attempts - 1:
-                raise
-            time.sleep(delay)
-
-def retrieve_context(question: str, n_results: int = 5):
-    q_emb = embed_text_ollama(question)
-    client = chroma_client_retry()
-    collection = client.get_or_create_collection(CHROMA_COLLECTION)
-    result = collection.query(
-        query_embeddings=[q_emb],
-        n_results=n_results,
-        include=["documents", "metadatas", "distances"]
-    )
-    docs = result.get("documents", [[]])[0]
-    metas = result.get("metadatas", [[]])[0]
-    return docs, metas
-
-def answer_with_rag_and_memory(question: str) -> dict:
-    docs, metas = retrieve_context(question, n_results=5)
-    context = "\n\n".join(docs)
-    st.session_state.recent_sources = metas
-    mode = st.session_state.mode
-    mode_instr = {
-        "Research question helper": "Help the student define or refine a precise, feasible research question; ask clarifying questions; propose concrete next steps.",
-        "Proposal refinement assistant": "Guide refinement of structure, methods, datasets, ethics, and BFH compliance; provide step-by-step edits and a short improvement plan."
-    }[mode]
-    persona = st.session_state.persona
-    persona_map = {
-        "Supervisor": {
-            "temp": 0.1,
-            "instr": "Strict critique. Identify weaknesses, risks, missing operationalization, measurement issues, and BFH compliance gaps. Add a short self-reflection checklist at the end."
-        },
-        "Helper": {
-            "temp": 0.2,
-            "instr": "Guided drafting. Provide structure, step-by-step guidance, short examples, and concrete next actions."
-        },
-        "Creative": {
-            "temp": 0.7,
-            "instr": "Brainstorm innovative topics and angles. Diverge with multiple ideas, then converge to 2–3 concrete candidates with crisp research questions and feasibility notes."
-        }
-    }
-    style = persona_map.get(persona, persona_map["Helper"])
+def answer_with_rag_and_memory(question: str) -> Dict[str, Any]:
     recent_qas_text = "\n\n".join(
-        [f"Q: {h.get('frage', '')}\nA: {h.get('antwort', '')}" for h in st.session_state.history if h.get("kind", "chat") == "chat"]
-    )
-    summary = st.session_state.summary
-    prompt = f"""You are a BFH thesis-proposal assistant.
-Use the provided context responsibly and cite helpful source titles if available.
-Mode: {mode}. Instruction: {mode_instr}
-Style: {persona} — {style["instr"]}
+        [
+            f"Q: {h.get('frage', '')}\nA: {h.get('antwort', '')}"
+            for h in st.session_state.history
+            if h.get("kind", "chat") == "chat"
+        ]
+    ) or "None"
 
-[Conversation Summary]
-{summary}
+    mode = st.session_state.mode
 
-[Recent Q&A]
-{recent_qas_text if recent_qas_text else 'None'}
+    # ---------------------------
+    # 1) Proposal refinement mode
+    # ---------------------------
+    if mode == "Proposal refinement assistant":
+        initial_state: ProposalState = {
+            "question": question,
+            "mode": mode,
+            "persona": st.session_state.persona,
+            "summary": st.session_state.summary,
+            "recent_qas": recent_qas_text,
+            "task": "proposal_refine",
+            "answer": "",
+        }
 
-[Retrieved Context]
-{context}
+        final_state = proposal_graph.invoke(
+            initial_state,
+            config={
+                "callbacks": [LANGFUSE_HANDLER],
+                "metadata": {
+                    "session_id": st.session_state.get(
+                        "upload_collection_name", "unknown"
+                    ),
+                    "mode": mode,
+                    "persona": st.session_state.persona,
+                },
+            },
+        )
 
-[User Question]
-{question}
+    # ---------------------------
+    # 2) Research question mode
+    # ---------------------------
+    else:
+        initial_state: AppState = {
+            "question": question,
+            "mode": mode,
+            "persona": st.session_state.persona,
+            "summary": st.session_state.summary,
+            "recent_qas": recent_qas_text,
+            "task": "structure_question",  # router will overwrite
+            "upload_collection_name": st.session_state.upload_collection_name,
+            "context_docs": [],
+            "selected_titles": [],
+            "metadatas": [],
+            "answer": "",
+            # gap pipeline fields
+            "gap_paper_docs": [],
+            "gap_paper_metas": [],
+            "gap_paper_summaries": "",
+            "gap_guides": "",
+            "gap_candidates": "",
+            "rq_candidates": "",
+            # methods pipeline fields
+            "methods_task": "critique_design",
+            "methods_guides": "",
+        }
 
-[Assistant Answer]
-Provide a helpful, concise answer grounded in the context. If the context is insufficient, state what is missing and propose next steps.
-If you cite, use a lightweight inline form like (Source: <title>).
-"""
-    model_answer = llm_complete(prompt, max_tokens=900, temperature=style["temp"])
-    return {"antwort": model_answer, "quellen": metas}
+        final_state = rag_graph.invoke(
+            initial_state,
+            config={
+                "callbacks": [LANGFUSE_HANDLER],
+                "metadata": {
+                    "session_id": st.session_state.get(
+                        "upload_collection_name", "unknown"
+                    ),
+                    "mode": mode,
+                    "persona": st.session_state.persona,
+                },
+            },
+        )
+
+    st.session_state.last_task = final_state.get("task", "?")
+    st.session_state.recent_sources = final_state.get("metadatas", [])
+
+    return {
+        "antwort": final_state["answer"],
+        "quellen": final_state.get("metadatas", []),
+    }
+
+
+
+# -------- UI: sidebar -------- #
 
 st.sidebar.header("Session Controls")
+
+st.sidebar.markdown(
+    f"**Upload collection ID:** `{st.session_state.upload_collection_name}`"
+)
+st.sidebar.markdown(f"**Last agent decision:** `{st.session_state.last_task}`")
+st.sidebar.markdown(
+    f"**Summarized papers stored:** {st.session_state.summarized_paper_count}"
+)
+
+st.sidebar.subheader("Upload your papers")
+uploaded_files = st.sidebar.file_uploader(
+    "Upload PDFs (papers, articles, etc.)",
+    type=["pdf"],
+    accept_multiple_files=True,
+)
+if uploaded_files and st.sidebar.button("Summarize uploaded papers"):
+    summaries = summarize_uploaded_papers(uploaded_files)
+    # Merge with existing ones (so you can add more later)
+    st.session_state.paper_summaries.update(summaries)
+    st.session_state.summarized_paper_count = len(st.session_state.paper_summaries)
+
+    st.sidebar.success(
+        f"Summarized {len(summaries)} paper(s). "
+        f"Total stored: {st.session_state.summarized_paper_count}"
+    )
+
+    if summaries:
+        st.sidebar.markdown("**Newly summarized:**")
+        for title in summaries.keys():
+            st.sidebar.markdown(f"- {title}")
+
+st.sidebar.markdown(
+    "💡 If your question is about **one specific paper**, mention its file name in the chat, "
+    'e.g. _\"In **review.pdf**, what is the paper about?\"_. '
+    "Otherwise, the assistant will consider all summarized papers."
+)
+
 st.sidebar.subheader("Assistant Mode")
 modes = ["Research question helper", "Proposal refinement assistant"]
-current_index = modes.index(st.session_state.mode) if st.session_state.mode in modes else 0
+current_index = (
+    modes.index(st.session_state.mode) if st.session_state.mode in modes else 0
+)
 st.session_state.mode = st.sidebar.radio(
     "Select a mode",
     modes,
@@ -225,7 +253,9 @@ st.session_state.mode = st.sidebar.radio(
 
 st.sidebar.subheader("Answer style")
 st.session_state.persona = st.sidebar.radio(
-    "Choose style", ["Supervisor", "Helper", "Creative"], index=["Supervisor","Helper","Creative"].index(st.session_state.persona)
+    "Choose style",
+    ["Supervisor", "Helper", "Creative"],
+    index=["Supervisor", "Helper", "Creative"].index(st.session_state.persona),
 )
 
 if st.sidebar.button("Summarize conversation"):
@@ -237,8 +267,13 @@ if st.sidebar.button("Reset session"):
     st.session_state.history = []
     st.session_state.summary = ""
     st.session_state.recent_sources = []
+    st.session_state.paper_summaries = {}
+    st.session_state.summarized_paper_count = 0
     st.experimental_rerun()
 
+# -------- UI: main chat -------- #
+
+# replay history
 for item in st.session_state.history:
     if item.get("kind", "chat") != "chat":
         continue
@@ -265,13 +300,16 @@ frage = st.chat_input("Ask a question...")
 if frage:
     with st.spinner("Thinking..."):
         result = answer_with_rag_and_memory(frage)
-        st.session_state.history.append({
-            "kind": "chat",
-            "frage": frage,
-            "antwort": result["antwort"],
-            "quellen": result["quellen"]
-        })
+        st.session_state.history.append(
+            {
+                "kind": "chat",
+                "frage": frage,
+                "antwort": result["antwort"],
+                "quellen": result["quellen"],
+            }
+        )
         st.session_state.summary = update_summary_ephemeral(
-            history=st.session_state.history, current_summary=st.session_state.summary
+            history=st.session_state.history,
+            current_summary=st.session_state.summary,
         )
         st.rerun()

@@ -12,6 +12,9 @@ services:
       - TOGETHER_API_KEY=${TOGETHER_API_KEY}
       - CHROMA_HOST=chroma
       - CHROMA_PORT=8000
+      - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY}
+      - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY}
+      - LANGFUSE_BASE_URL=${LANGFUSE_BASE_URL}
     depends_on:
       - chroma
       - ollama
