@@ -1,0 +1,149 @@
+/* Global background + typography */
+.stApp {
+    background-image: url("assets/bcg.png");
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    background-attachment: fixed;
+    color: #1f2937;
+    font-family: "Poppins", "Segoe UI", sans-serif;
+}
+
+/* Light glass card for main container */
+section.main .block-container {
+    background: rgba(255, 255, 255, 0.78);
+    border-radius: 32px;
+    padding: 2.5rem 3rem;
+    box-shadow: 0 25px 60px rgba(15, 23, 42, 0.25);
+    backdrop-filter: blur(18px);
+}
+
+/* Hide default Streamlit footers */
+#MainMenu, header[data-testid="stHeader"], footer {
+    visibility: hidden;
+    height: 0;
+}
+
+/* Sidebar style */
+section[data-testid="stSidebar"] {
+    background: #6130349a;
+    backdrop-filter: blur(12px);
+    color: #f8fafc;
+}
+section[data-testid="stSidebar"] * {
+    color: #f8fafc !important;
+}
+
+/* Chat message bubble tweaks */
+div[data-testid="stChatMessage"] {
+    border-radius: 28px;
+    padding: 1rem 1.2rem;
+    background: rgba(255, 255, 255, 0.85);
+    box-shadow: 0 10px 25px rgba(30, 41, 59, 0.18);
+    border: 1px solid rgba(148, 163, 184, 0.35);
+}
+div[data-testid="stChatMessage"][data-testid*="user"] {
+    background: rgba(236, 72, 153, 0.2);
+    border-color: rgba(236, 72, 153, 0.35);
+}
+
+/* Chat input */
+div.stChatInputContainer {
+    background: transparent;
+    border-radius: 999px;
+    padding: 0.5rem 1rem;
+    border: none;
+    box-shadow: none;
+}
+div.stChatInputContainer textarea {
+    background: transparent;
+    border: none !important;
+    font-size: 1.05rem;
+    color: #1f2937;
+}
+div.stChatInputContainer button[kind="primary"] {
+    border-radius: 999px;
+    padding: 0.6rem 1.1rem;
+    background: linear-gradient(135deg, #3b82f6, #60a5fa);
+    border: none;
+    color: #fff;
+    font-weight: 600;
+    box-shadow: 0 8px 20px rgba(59, 130, 246, 0.35);
+}
+
+/* Buttons + radio */
+.stButton button, .stRadio > div {
+    border-radius: 999px;
+}
+.stButton button:hover {
+    background: #18a8b588;
+    border-color: #10869196;
+}
+
+/* Remove helper pill next to chat input */
+div[data-testid="stChatInputStatus"],
+.stChatMessageInputStatus,
+div.stChatInputContainer > div:last-child {
+    display: none !important;
+}
+
+/* Hero section */
+.hero-title {
+    font-size: 2.2rem;
+    font-weight: 600;
+    color: #1c2a44;
+    text-align: center;
+    margin-bottom: 0.3rem;
+}
+.hero-subtitle {
+    text-align: center;
+    font-size: 1.1rem;
+    color: #4b5563;
+    margin-bottom: 1.5rem;
+}
+.hero-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 1rem;
+}
+.hero-card {
+    background: rgba(255, 255, 255, 0.92);
+    border-radius: 20px;
+    padding: 1.2rem;
+    box-shadow: 0 12px 30px rgba(15, 23, 42, 0.12);
+    border: 1px solid rgba(148, 163, 184, 0.3);
+    font-size: 0.95rem;
+}
+.hero-card strong {
+    display: block;
+    font-size: 1rem;
+    color: #111827;
+    margin-bottom: 0.4rem;
+}
+
+/* File uploader (sidebar) */
+[data-testid="stFileUploaderDropzone"] {
+    border: 1px dashed rgba(59, 130, 246, 0.4);
+    border-radius: 24px;
+    padding: 1.2rem;
+    background: rgba(255, 255, 255, 0.08);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06),
+        0 10px 25px rgba(15, 23, 42, 0.25);
+    color: #f8fafc;
+}
+[data-testid="stFileUploaderDropzone"] span,
+[data-testid="stFileUploaderDropzone"] small {
+    color: #f8fafc !important;
+}
+[data-testid="stBaseButton-secondary"] {
+    border-radius: 999px;
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.5);
+    color: #f8fafc;
+    font-weight: 600;
+    transition: all 0.2s ease;
+}
+[data-testid="stBaseButton-secondary"]:hover {
+    background: #18a8b588;
+    border-color: #10869196;
+}

@@ -1,10 +1,11 @@
 # llm_service.py
 
 import os
+import time
 from typing import Dict, Any
 
 from dotenv import load_dotenv
-from openai import OpenAI
+from openai import OpenAI, APITimeoutError, APIConnectionError
 
 # Make sure .env is loaded as soon as this module is imported
 load_dotenv()
@@ -33,20 +34,33 @@ class LLMService:
         user_prompt: str,
         temperature: float = 0.7,
     ) -> Dict[str, Any]:
-        response = self.client.chat.completions.create(
-            model="ollama/gpt-oss:120b",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            temperature=temperature,
-        )
-
-        return {
-            "text": response.choices[0].message.content.strip(),
-            "model": response.model,
-            "usage": response.usage,
-        }
+        last_err = None
+        for attempt in range(3):
+            try:
+                response = self.client.chat.completions.create(
+                    model="ollama/gpt-oss:120b",
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    temperature=temperature,
+                    timeout=180,
+                )
+                return {
+                    "text": response.choices[0].message.content.strip(),
+                    "model": response.model,
+                    "usage": response.usage,
+                }
+            except (APITimeoutError, APIConnectionError) as err:
+                last_err = err
+                if attempt < 2:
+                    time.sleep(2 * (attempt + 1))
+                    continue
+                raise RuntimeError(
+                    "The BFH LLM could not be reached (timeout/connection). "
+                    "Please retry with a smaller file or try again later."
+                ) from err
+        raise last_err or RuntimeError("Unknown LLM error")
 
 
 llm_service = LLMService()
