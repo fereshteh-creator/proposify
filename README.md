@@ -76,6 +76,23 @@ You can now ask questions like:
 You only need to import embeddings after rebuilding (--build) or clearing the Chroma volume.
  
 Do not push data/chroma/ to Git – it’s excluded automatically.
+
+### To see the graph:
+
+When the Docker is running from rag-chatbot run:
+
+    docker exec -it rag_chatbot_app bash
+
+And then:
+
+    python visualize_graph.py
+
+And wenn finished `exit` or `Crt+D` btw. can also look at the png
+
+### dont forget to turn on the vpn
+
+### langfuse for debugging and tracking
+
  
 To run the docker again run:
  
