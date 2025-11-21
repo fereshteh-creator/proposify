@@ -1,95 +1,87 @@
-import os
 import requests
 import chromadb
 from dotenv import load_dotenv
+
+from llm_service import llm_service
 
 
 load_dotenv()
 
 
-# === Together.ai Setup ===
-TOGETHER_API_KEY = os.getenv("TOGETHER_API_KEY")
-MIXTRAL_MODEL = "mistralai/Mixtral-8x7B-Instruct-v0.1"
-assert TOGETHER_API_KEY, "Bitte TOGETHER_API_KEY als Umgebungsvariable setzen."
+def main() -> None:
+    # === Frage abfragen ===
+    question = input("Was möchtest du wissen?\n> ").strip()
+    if not question:
+        print("Keine Frage eingegeben.")
+        return
 
-# === Frage abfragen ===
-frage = input("Was möchtest du wissen?\n> ").strip()
-if not frage:
-    print("Keine Frage eingegeben.")
-    exit()
+    # === Embedding mit nomic-embed-text via Ollama ===
+    print("Erzeuge Embedding für die Frage...")
+    embed_response = requests.post(
+        "http://localhost:11434/api/embeddings",
+        json={"model": "nomic-embed-text", "prompt": question},
+        timeout=60,
+    )
+    if embed_response.status_code != 200:
+        print("Fehler beim Embedding:", embed_response.text)
+        return
 
-# === Embedding mit nomic-embed-text via Ollama ===
-print("Erzeuge Embedding für die Frage...")
-embed_response = requests.post("http://localhost:11434/api/embeddings", json={
-    "model": "nomic-embed-text",
-    "prompt": frage
-})
-if embed_response.status_code != 200:
-    print("Fehler beim Embedding:", embed_response.text)
-    exit()
+    question_embedding = embed_response.json()["embedding"]
 
-frage_embedding = embed_response.json()["embedding"]
+    # === ChromaDB: relevante Chunks abrufen ===
+    print("Suche relevante Chunks in Chroma...")
+    client = chromadb.HttpClient(host="localhost", port=8000)
+    collection = client.get_or_create_collection("gesetzestexte")
+    result = collection.query(
+        query_embeddings=[question_embedding],
+        n_results=5,
+        include=["documents", "metadatas", "distances"],
+    )
 
-# === ChromaDB: relevante Chunks abrufen ===
-print("Suche relevante Chunks in Chroma...")
-client = chromadb.HttpClient(host="localhost", port=8000)
-collection = client.get_or_create_collection("gesetzestexte")
-result = collection.query(
-    query_embeddings=[frage_embedding],
-    n_results=5,
-    include=["documents", "metadatas", "distances"]
-)
+    documents = result.get("documents", [[]])[0]
+    metadatas = result.get("metadatas", [[]])[0]
 
-top_docs = result["documents"][0]
+    # === Welche Dokumente & Abschnitte wurden verwendet? ===
+    print("\n--- Verwendete Dokumente / Quellen ---")
+    for i, meta in enumerate(metadatas):
+        quelle = meta.get("quelle", "Unbekannt")
+        chunk_id = meta.get("chunk_id", "N/A")
+        print(f"{i + 1}. {quelle} - Chunk {chunk_id}")
 
-# === Welche Dokumente & Abschnitte wurden verwendet? ===
-print("\n---Verwendete Dokumente / Quellen ---")
-for i, meta in enumerate(result["metadatas"][0]):
-    quelle = meta.get("quelle", "Unbekannt")
-    chunk_id = meta.get("chunk_id", "N/A")
-    print(f"{i+1}. {quelle} – Chunk {chunk_id}")
+    context = "\n\n".join(documents)
 
-kontext = "\n\n".join(top_docs)
+    # === Prompt für BFH LLM bauen ===
+    user_prompt = f"""Beantworte die folgende Frage ausschließlich basierend auf dem gegebenen Kontext.
 
-
-# === Prompt für Mixtral bauen ===
-prompt = f"""Beantworte die folgende Frage ausschließlich basierend auf dem gegebenen Kontext.
-
-Frage: {frage}
+Frage: {question}
 
 Kontext:
-{kontext}
+{context}
 
 Antwort:"""
 
-# === Anfrage an Mixtral senden ===
-print("Anfrage wird an Together.ai gesendet...")
-response = requests.post(
-    "https://api.together.xyz/v1/completions",
-    headers={"Authorization": f"Bearer {TOGETHER_API_KEY}"},
-    json={
-        "model": MIXTRAL_MODEL,
-        "prompt": prompt,
-        "max_tokens": 1024,
-        "temperature": 0.1
-    }
-)
+    # === Anfrage an BFH LLM senden ===
+    print("Anfrage wird an die BFH LLM gesendet...")
+    system_prompt = (
+        "Du bist ein hilfreicher Assistent in einem RAG-Chatbot. "
+        "Beantworte Fragen ausschließlich basierend auf dem bereitgestellten Kontext."
+    )
+    try:
+        response = llm_service.generate_completion(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            temperature=0.1,
+        )
+        answer = response["text"]
+    except Exception as exc:
+        print("Fehler bei LLM-Request:", exc)
+        return
 
-# === Fehlerbehandlung & Parsing ===
-if response.status_code != 200:
-    print("Fehler bei LLM-Request:", response.status_code)
-    print(response.text)
-    exit()
+    # === Ausgabe ===
+    print("\n--- Antwort ---")
+    print(answer.strip())
 
-response_json = response.json()
 
-if "choices" not in response_json:
-    print("Unerwartete Antwortstruktur:")
-    print(response_json)
-    exit()
+if __name__ == "__main__":
+    main()
 
-antwort = response_json["choices"][0]["text"]
-
-# === Ausgabe ===
-print("\n--- Antwort ---")
-print(antwort.strip())

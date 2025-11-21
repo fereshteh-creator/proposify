@@ -12,7 +12,7 @@ load_dotenv()
 
 
 class LLMService:
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the LLM service with API credentials from environment."""
         api_key = os.getenv("BFH_LLM_API_KEY")
 
@@ -26,7 +26,7 @@ class LLMService:
             api_key=api_key,
         )
 
-        print("✓ LLM Service initialized successfully!")
+        print("LLM Service initialized successfully.")
 
     def generate_completion(
         self,
@@ -34,6 +34,11 @@ class LLMService:
         user_prompt: str,
         temperature: float = 0.7,
     ) -> Dict[str, Any]:
+        """
+        Generate a chat-style completion from the BFH LLM.
+
+        Returns a dict with keys: text, model, usage.
+        """
         last_err = None
         for attempt in range(3):
             try:
@@ -64,3 +69,4 @@ class LLMService:
 
 
 llm_service = LLMService()
+

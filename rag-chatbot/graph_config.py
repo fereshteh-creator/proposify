@@ -361,7 +361,9 @@ def methods_retrieve_guidance(state: AppState) -> AppState:
     else:  # refine_question
         flavored = base_q + " (good research questions, operationalization, variables, constructs, Creswell research questions)"
 
-    docs, metas = retrieve_kb_context(flavored, n_results=8)
+    # Ensure that at least two BFH guideline chunks are included alongside
+    # Creswell, so that students always see BFH-specific requirements.
+    docs, metas = retrieve_kb_context(flavored, n_results=8, min_bfh=2)
     state["context_docs"] = docs
     state["metadatas"] = metas
     state["methods_guides"] = "\n\n".join(docs)

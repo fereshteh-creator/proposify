@@ -9,19 +9,14 @@ import chromadb
 import fitz  # PyMuPDF
 from dotenv import load_dotenv
 
-from llm_service import llm_service  # <-- BFH LLM wrapper
+from llm_service import llm_service  # BFH LLM wrapper
 
 load_dotenv()
+
 
 # --------------------------------------------------------------------
 # Environment + config
 # --------------------------------------------------------------------
-
-TOGETHER_API_KEY = os.getenv("TOGETHER_API_KEY")
-if not TOGETHER_API_KEY:
-    raise ValueError("Bitte TOGETHER_API_KEY als Umgebungsvariable setzen.")
-
-MIXTRAL_MODEL = os.getenv("LLM_MODEL", "mistralai/Mixtral-8x7B-Instruct-v0.1")
 
 # Embeddings for STATIC KB (Creswell / BFH docs)
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "nomic-embed-text")
@@ -37,31 +32,43 @@ CHROMA_HOST = os.getenv("CHROMA_HOST", "chroma")
 CHROMA_PORT = int(os.getenv("CHROMA_PORT", "8000"))
 CHROMA_KB_COLLECTION = os.getenv("CHROMA_COLLECTION", "gesetzestexte")
 
+# Known BFH guideline sources in the KB (values of the `quelle` metadata field)
+BFH_SOURCES = [
+    "AI Policy BFH_EN",
+    "AI Recommendations for Lecturers_DE_EN",
+    "BScDigi_Proposal_Instruction_EN_v1",
+    "Plagiarism_Guidelines_DE",
+    "Plagiarism_Guidelines_EN",
+    "Regulations written assignments_DE",
+    "Regulations written assignments_EN",
+]
+
 
 # --------------------------------------------------------------------
-# LLM (Together / Mixtral) for router, methods & gap pipelines
+# LLM helper for router, methods & gap pipelines
 # --------------------------------------------------------------------
 
 def llm_complete(prompt: str, max_tokens: int = 1024, temperature: float = 0.2) -> str:
     """
-    Call Together's completion endpoint with the configured MIXTRAL_MODEL.
+    Call the BFH LLM via the shared `llm_service` wrapper.
 
-    Used by the LangGraph pipelines (router, methods, gap, memory summariser).
+    This keeps a simple text-in / text-out interface that is used by the
+    LangGraph pipelines (router, methods, gap, memory summariser).
+
+    The `max_tokens` parameter is kept for backwards compatibility with
+    existing call sites; the underlying chat model currently controls the
+    exact token count.
     """
-    resp = requests.post(
-        "https://api.together.xyz/v1/completions",
-        headers={"Authorization": f"Bearer {TOGETHER_API_KEY}"},
-        json={
-            "model": MIXTRAL_MODEL,
-            "prompt": prompt,
-            "max_tokens": max_tokens,
-            "temperature": temperature,
-        },
-        timeout=60,
+    resp = llm_service.generate_completion(
+        system_prompt=(
+            "You are a helpful assistant in a thesis proposal RAG chatbot. "
+            "Follow the instructions in the user message carefully and "
+            "return only the answer text."
+        ),
+        user_prompt=prompt,
+        temperature=temperature,
     )
-    if resp.status_code != 200:
-        raise RuntimeError(f"LLM error: {resp.status_code} — {resp.text}")
-    return resp.json().get("choices", [{}])[0].get("text", "").strip()
+    return resp.get("text", "").strip()
 
 
 # --------------------------------------------------------------------
@@ -98,17 +105,17 @@ def embed_text_ollama(text: str) -> List[float]:
     """
     global EMBEDDING_MODEL
 
-    def _embed(model):
-        r = requests.post(
+    def _embed(model: str):
+        return requests.post(
             EMBEDDING_URL,
             json={"model": model, "prompt": text},
             timeout=120,
         )
-        return r
 
     r = _embed(EMBEDDING_MODEL)
     if r.status_code == 200:
         return r.json().get("embedding")
+
     if r.status_code == 404 and "not found" in r.text.lower():
         chosen = ensure_embedding_model(EMBEDDING_MODEL)
         r2 = _embed(chosen)
@@ -120,7 +127,8 @@ def embed_text_ollama(text: str) -> List[float]:
             if r3.status_code == 200:
                 EMBEDDING_MODEL = alt
                 return r3.json().get("embedding")
-    raise RuntimeError(f"Embedding error: {r.status_code} — {r.text}")
+
+    raise RuntimeError(f"Embedding error: {r.status_code} - {r.text}")
 
 
 # -------- Chroma helpers (static KB only) -------- #
@@ -140,28 +148,71 @@ def get_chroma_client(max_attempts: int = 10, delay: float = 2.0):
             time.sleep(delay)
 
 
-def retrieve_kb_context(question: str, n_results: int = 5):
+def retrieve_kb_context(question: str, n_results: int = 5, min_bfh: int = 0):
     """
     Retrieve from the static Creswell / BFH methods knowledge base.
 
     This is vector-based (Chroma) but only for the fixed KB docs,
     not for user-uploaded PDFs.
+
+    If `min_bfh` > 0, we try to ensure that at least that many chunks come
+    from BFH guideline documents (AI policy, proposal instructions,
+    plagiarism/regulations), as long as they appear near the top of the
+    similarity ranking.
     """
     q_emb = embed_text_ollama(question)
     client = get_chroma_client()
     collection = client.get_or_create_collection(CHROMA_KB_COLLECTION)
+
+    # Ask Chroma for more results than we finally need so we can mix sources.
+    raw_n = n_results if min_bfh <= 0 else max(n_results * 2, n_results + min_bfh)
     result = collection.query(
         query_embeddings=[q_emb],
-        n_results=n_results,
+        n_results=raw_n,
         include=["documents", "metadatas", "distances"],
     )
-    docs = result.get("documents", [[]])[0]
-    metas = result.get("metadatas", [[]])[0]
-    return docs, metas
+    docs_all = result.get("documents", [[]])[0]
+    metas_all = result.get("metadatas", [[]])[0]
+
+    if min_bfh <= 0:
+        return docs_all[:n_results], metas_all[:n_results]
+
+    bfh_docs: List[str] = []
+    bfh_metas: List[Dict[str, Any]] = []
+    other_docs: List[str] = []
+    other_metas: List[Dict[str, Any]] = []
+
+    for doc, meta in zip(docs_all, metas_all):
+        quelle = (meta or {}).get("quelle", "")
+        if quelle in BFH_SOURCES:
+            bfh_docs.append(doc)
+            bfh_metas.append(meta)
+        else:
+            other_docs.append(doc)
+            other_metas.append(meta)
+
+    final_docs: List[str] = []
+    final_metas: List[Dict[str, Any]] = []
+
+    # 1) Take up to `min_bfh` BFH guideline chunks first (if available).
+    for doc, meta in zip(bfh_docs, bfh_metas):
+        if len(final_docs) >= min_bfh or len(final_docs) >= n_results:
+            break
+        final_docs.append(doc)
+        final_metas.append(meta)
+
+    # 2) Fill remaining slots with the highest-ranked other chunks.
+    for doc, meta in zip(other_docs, other_metas):
+        if len(final_docs) >= n_results:
+            break
+        final_docs.append(doc)
+        final_metas.append(meta)
+
+    return final_docs, final_metas
 
 
 # --------------------------------------------------------------------
-# NEW: Full-paper summarization with BFH LLM (gpt-oss:120b)
+# Full-paper summarization with BFH LLM (gpt-oss:120b)
 # --------------------------------------------------------------------
 
 def _extract_full_text_from_pdf(data: bytes) -> str:

@@ -8,7 +8,8 @@ They take care of:
 - Formatting retrieved Creswell/BFH context for prompts.
 - Formatting uploaded paper summaries so that the proposal agent can reuse them.
 
-All prompts still rely on the Together `llm_complete` helper from `rag_tools`.
+All prompts rely on the `llm_complete` helper from `rag_tools`, which in turn
+uses the shared BFH LLM service.
 """
 
 import html

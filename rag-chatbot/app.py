@@ -346,6 +346,8 @@ def answer_with_rag_and_memory(question: str) -> Dict[str, Any]:
             "recent_qas": recent_qas_text,
             "task": "structure_question",  # router will overwrite
             "upload_collection_name": st.session_state.upload_collection_name,
+            # summaries of uploaded PDFs (filled via sidebar button)
+            "paper_summaries": st.session_state.paper_summaries,
             "context_docs": [],
             "selected_titles": [],
             "metadatas": [],
