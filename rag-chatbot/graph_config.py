@@ -227,7 +227,7 @@ def paper_synthesize_answer(state: AppState) -> AppState:
 
     We:
     - build a combined context
-    - send it to Mixtral with strong anti-hallucination rules
+    - send it to gpt with strong anti-hallucination rules
     - also store the combined summaries in gap_paper_summaries
       so the gap pipeline can reuse them.
     """
