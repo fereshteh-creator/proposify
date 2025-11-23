@@ -47,9 +47,15 @@ st.set_page_config(page_title="Proposify", layout="wide")
 
 
 def inject_custom_css():
-    css_path = Path("styles/custom.css")
+    # Look for the CSS relative to this file to avoid CWD issues
+    css_candidates = [
+        Path(__file__).parent / "styles" / "custom.css",
+        Path("styles/custom.css"),
+        Path(__file__).parent.parent / "styles" / "custom.css",
+    ]
+    css_path = next((p for p in css_candidates if p.exists()), None)
     css_chunks = []
-    if css_path.exists():
+    if css_path and css_path.exists():
         with open(css_path, "r", encoding="utf-8") as f:
             css_chunks.append(f.read())
 
@@ -71,10 +77,12 @@ def inject_custom_css():
 
 inject_custom_css()
 col1, col2 = st.columns([1, 1])
+
 with col1:
-    st.image("assets/logo.png", width=500)
+    st.image("./assets/logo.png", width=500)
+
 with col2:
-    st.markdown(" ")
+    st.write("")
 
 # -------- session state -------- #
 
@@ -101,6 +109,10 @@ if "last_task" not in st.session_state:
     st.session_state.last_task = "(none)"
 if "langfuse_trace_id" not in st.session_state:
     st.session_state.langfuse_trace_id = None
+if "onboarding_step" not in st.session_state:
+    st.session_state.onboarding_step = 1
+if "onboarding_complete" not in st.session_state:
+    st.session_state.onboarding_complete = False
 
 MEMORY_MAX_TOKENS = 1800
 ENCODING = tiktoken.get_encoding("cl100k_base")
@@ -136,16 +148,16 @@ WRITE_COMMAND_RE = re.compile(
 
 HERO_EXAMPLES = [
     {
-        "title": "1. Assistant modes",
-        "body": "Choose your desired Assistant - Research question helper for ... or Proposal refinement assistant if you need help or have any questions regarding your thesis proposal.",
+        "title": "Step 1: Explore your idea",
+        "body": "Start with the Research question helper to probe your topic, narrow scope, and land on a clear direction.",
     },
     {
-        "title": "2. Answer styles",
-        "body": "Choose one of three answer styles for better answers! Supervisor if you need critique, Helper if you need some advice regarding your proposal or Creative if you want some crazy ideas!",
+        "title": "Step 2: Refine the draft",
+        "body": "Switch to the Proposal refinement assistant to critique structure, surface gaps, and polish for submission.",
     },
     {
-        "title": "3. Upload your files",
-        "body": "Upload your notes if you have them and let our smart assistant craft a professional proposal for you."
+        "title": "Step 3: Ground it in your files",
+        "body": "Upload your PDFs and notes, and the assistant will use your content to give personalized feedback and keep you focused"
     }
 ]
 
@@ -156,6 +168,48 @@ HERO_NOTE = (
 
 USER_AVATAR = "assets/user.png"
 ASSISTANT_AVATAR = "assets/chat.png"
+
+AGENT_OPTIONS = [
+    {
+        "label": "Research question helper",
+        "tagline": "Shape and tighten your research question.",
+        "details": "Best when you are still exploring topics, refining scope, or stress-testing a research idea.",
+    },
+    {
+        "label": "Proposal refinement assistant",
+        "tagline": "Polish an existing proposal draft.",
+        "details": "Best when you already have a structure or draft and need sharper arguments, gaps, or methodology advice.",
+    },
+]
+
+PERSONA_OPTIONS = [
+    {
+        "label": "Supervisor",
+        "tagline": "Critical, concise, and focused on rigor.",
+        "details": "Expect probing questions, risk checks, and academic tone.",
+    },
+    {
+        "label": "Helper",
+        "tagline": "Supportive, clear, and actionable.",
+        "details": "Expect guidance, step lists, and straightforward suggestions.",
+    },
+    {
+        "label": "Creative",
+        "tagline": "Playful, lateral, and idea-heavy.",
+        "details": "Expect alternative angles, analogies, and speculative directions.",
+    },
+]
+
+def _find_asset(name: str) -> Path | None:
+    candidates = [
+        Path(__file__).parent / "assets" / name,
+        Path("assets") / name,
+        Path(__file__).parent.parent / "assets" / name,
+    ]
+    for path in candidates:
+        if path.exists():
+            return path
+    return None
 
 # -------- hero + styling helpers -------- #
 
@@ -318,6 +372,7 @@ def answer_with_rag_and_memory(question: str) -> Dict[str, Any]:
             "metadatas": [],
             "context_docs": [],
             "next_step": "",
+            "last_task": st.session_state.last_task,
         }
 
         final_state = proposal_graph.invoke(
@@ -330,6 +385,7 @@ def answer_with_rag_and_memory(question: str) -> Dict[str, Any]:
                     ),
                     "mode": mode,
                     "persona": st.session_state.persona,
+                    "last_task": st.session_state.last_task,
                 },
             },
         )
@@ -386,27 +442,125 @@ def answer_with_rag_and_memory(question: str) -> Dict[str, Any]:
         "quellen": final_state.get("metadatas", []),
     }
 
+def render_onboarding():
+    step = st.session_state.onboarding_step
+    total_steps = 2
+    st.markdown("### Configure your assistant to start chatting")
+    st.progress(step / total_steps)
 
+    with st.container():
+        if step == 1:
+            st.markdown("**Step 1 of 2: Choose the agent type**")
+            st.caption(
+                "Pick how the assistant should behave before we move on to the answer style."
+            )
+            selected_mode = st.radio(
+                "Agent type",
+                [opt["label"] for opt in AGENT_OPTIONS],
+                index=next(
+                    (i for i, opt in enumerate(AGENT_OPTIONS) if opt["label"] == st.session_state.mode),
+                    0,
+                ),
+                help=(
+                    "Research question helper is ideal when you are exploring topics or refining a question. "
+                    "Proposal refinement assistant is ideal when you already have a draft and want critique or structure help."
+                ),
+                key="onboarding_mode",
+            )
+            st.session_state.mode = selected_mode
+
+            cols = st.columns(len(AGENT_OPTIONS))
+            for col, option in zip(cols, AGENT_OPTIONS):
+                with col:
+                    st.markdown(
+                        f"""
+                        <div class='option-card'>
+                            <div class='option-title'>{option['label']}</div>
+                            <div class='option-tagline'>{option['tagline']}</div>
+                            <div class='option-detail'>{option['details']}</div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+            st.markdown("<div style='height:12px;'></div>", unsafe_allow_html=True)
+
+            if st.button(
+                "Continue to answer style",
+                type="primary",
+                help="Save the agent type and move to answer style selection.",
+                key="continue_to_step_two",
+            ):
+                st.session_state.onboarding_step = 2
+                st.rerun()
+
+        elif step == 2:
+            st.markdown("**Step 2 of 2: Choose the answer style**")
+            st.caption("Select how the assistant should sound once chat begins.")
+
+            selected_persona = st.radio(
+                "Answer style",
+                [opt["label"] for opt in PERSONA_OPTIONS],
+                index=next(
+                    (i for i, opt in enumerate(PERSONA_OPTIONS) if opt["label"] == st.session_state.persona),
+                    0,
+                ),
+                help=(
+                    "Supervisor is critical and direct, Helper is supportive and clear, Creative is lateral and idea-heavy."
+                ),
+                key="onboarding_persona",
+            )
+            st.session_state.persona = selected_persona
+
+            cols = st.columns(len(PERSONA_OPTIONS))
+            for col, option in zip(cols, PERSONA_OPTIONS):
+                with col:
+                    st.markdown(
+                        f"""
+                        <div class='option-card'>
+                            <div class='option-title'>{option['label']}</div>
+                            <div class='option-tagline'>{option['tagline']}</div>
+                            <div class='option-detail'>{option['details']}</div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+            st.markdown("<div style='height:12px;'></div>", unsafe_allow_html=True)
+
+            button_cols = st.columns([1, 1])
+            with button_cols[0]:
+                if st.button(
+                    "Back to agent type",
+                    help="Go back to adjust the agent type.",
+                    key="back_to_step_one",
+                ):
+                    st.session_state.onboarding_step = 1
+                    st.rerun()
+            with button_cols[1]:
+                if st.button(
+                    "Start chatting",
+                    type="primary",
+                    help="Lock in your setup and open the chat window.",
+                    key="finish_onboarding",
+                ):
+                    st.session_state.onboarding_complete = True
+                    st.session_state.onboarding_step = 2
+                    st.rerun()
 
 # -------- UI: sidebar -------- #
 
-st.sidebar.header("Session Controls")
-
-st.sidebar.markdown(
-    f"**Upload collection ID:** `{st.session_state.upload_collection_name}`"
-)
-st.sidebar.markdown(f"**Last agent decision:** `{st.session_state.last_task}`")
-st.sidebar.markdown(
-    f"**Summarized papers stored:** {st.session_state.summarized_paper_count}"
-)
+st.sidebar.header("Assistant setup")
 
 st.sidebar.subheader("Upload your papers")
 uploaded_files = st.sidebar.file_uploader(
     "Upload PDFs (papers, articles, etc.)",
     type=["pdf"],
     accept_multiple_files=True,
+    help="Add PDFs to summarize so the assistant can ground answers in them.",
 )
-if uploaded_files and st.sidebar.button("Summarize uploaded papers"):
+if uploaded_files and st.sidebar.button(
+    "Summarize uploaded papers",
+    help="Summarize the selected PDFs and store the summaries for this session. Works in both modes.",
+):
     summaries = summarize_uploaded_papers(uploaded_files)
     st.session_state.paper_summaries.update(summaries)
     st.session_state.summarized_paper_count = len(st.session_state.paper_summaries)
@@ -421,10 +575,8 @@ if uploaded_files and st.sidebar.button("Summarize uploaded papers"):
         for title in summaries.keys():
             st.sidebar.markdown(f"- {title}")
 
-st.sidebar.markdown(
-    "💡 If your question is about **one specific paper**, mention its file name in the chat, "
-    'e.g. _\"In **review.pdf**, what is the paper about?\"_. '
-    "Otherwise, the assistant will consider all summarized papers."
+st.sidebar.caption(
+    "Tip: If your question is about one specific paper, mention its file name in the chat. Otherwise, all summarized papers are considered."
 )
 st.sidebar.subheader("Assistant Mode")
 modes = ["Research question helper", "Proposal refinement assistant"]
@@ -435,32 +587,62 @@ st.session_state.mode = st.sidebar.radio(
     "Select a mode",
     modes,
     index=current_index,
-    label_visibility="collapsed",
+    label_visibility="visible",
     key="mode_select",
+    help="Switch between exploring/refining research questions or polishing an existing proposal.",
 )
 
 st.sidebar.subheader("Answer style")
+persona_options = ["Supervisor", "Helper", "Creative"]
+persona_index = (
+    persona_options.index(st.session_state.persona)
+    if st.session_state.persona in persona_options
+    else 0
+)
 st.session_state.persona = st.sidebar.radio(
     "Choose style",
-    ["Supervisor", "Helper", "Creative"],
-    index=["Supervisor", "Helper", "Creative"].index(st.session_state.persona),
+    persona_options,
+    index=persona_index,
+    help="Decide whether responses should be critical (Supervisor), supportive (Helper), or idea-driven (Creative).",
 )
 
-if st.sidebar.button("Summarize conversation"):
+if st.sidebar.button(
+    "Summarize conversation",
+    help="Generate a running summary of the current chat so far.",
+):
     summary_text = st.session_state.summary or "No summary yet - start chatting!"
     st.sidebar.markdown("### Session Summary")
     st.sidebar.write(summary_text)
 
-if st.sidebar.button("Reset session"):
+if st.sidebar.button(
+    "Reset session",
+    help="Clear chat history, summaries, and restart the onboarding flow.",
+):
     st.session_state.history = []
     st.session_state.summary = ""
     st.session_state.recent_sources = []
     st.session_state.paper_summaries = {}
     st.session_state.summarized_paper_count = 0
     st.session_state.langfuse_trace_id = None
+    st.session_state.onboarding_step = 1
+    st.session_state.onboarding_complete = False
     st.rerun()
 
+st.sidebar.markdown("---")
+with st.sidebar.expander("Developer tools", expanded=False):
+    st.markdown(
+        f"**Upload collection ID:** `{st.session_state.upload_collection_name}`"
+    )
+    st.markdown(f"**Last agent decision:** `{st.session_state.last_task}`")
+    st.markdown(
+        f"**Summarized papers stored:** {st.session_state.summarized_paper_count}"
+    )
+
 # -------- UI: main chat -------- #
+
+if not st.session_state.onboarding_complete:
+    render_onboarding()
+    st.stop()
 
 render_hero_section()
 
