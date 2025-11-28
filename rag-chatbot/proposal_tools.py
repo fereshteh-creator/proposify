@@ -69,6 +69,67 @@ FALLBACK_TEMPLATE_OUTLINE = """### Introduction & relevance of the topic
 - Provide the preliminary bibliography that underpins the sections above.
 """
 
+EXAMPLES_DIRS = [
+    Path(__file__).parent.parent / "examples",
+    Path(__file__).parent / "examples",
+    Path(__file__).parent.parent,
+    Path(__file__).parent,
+]
+
+
+def _humanize_stem(stem: str) -> str:
+    stem = stem.replace("_", " ").replace("-", " ").strip()
+    return re.sub(r"\s+", " ", stem).strip().title()
+
+
+@lru_cache(maxsize=1)
+def discover_specialization_examples() -> Dict[str, Path]:
+    """
+    Discover available specialization example files.
+
+    Rules:
+    - Look for Markdown files in an `examples/` folder, or fallback to repo roots.
+    - Skip generic files like README.md.
+    - Use the stem as the display label (title-cased, underscores/dashes -> spaces).
+    """
+    found: Dict[str, Path] = {}
+    for base in EXAMPLES_DIRS:
+        if base.is_dir():
+            for path in base.glob("*.md"):
+                if "readme" in path.stem.lower():
+                    continue
+                label = _humanize_stem(path.stem)
+                found.setdefault(label, path)
+        elif base.is_file() and base.suffix == ".md":
+            if "readme" in base.stem.lower():
+                continue
+            label = _humanize_stem(base.stem)
+            found.setdefault(label, base)
+
+    return found
+
+
+@lru_cache(maxsize=1)
+def load_proposal_examples(max_chars: int = 4000) -> str:
+    """
+    Legacy helper: returns an empty string when no specialization example is found.
+    """
+    return ""
+
+
+def load_specialization_example(label: str) -> str:
+    """
+    Load the proposal example that matches the given specialization label.
+    Returns the full file (no truncation).
+    """
+    mapping = discover_specialization_examples()
+    path = mapping.get(label)
+    if not path or not path.exists():
+        return load_proposal_examples()
+    raw = path.read_text(encoding="utf-8")
+    clean = re.sub(r"\n{3,}", "\n\n", raw).strip()
+    return clean
+
 
 @lru_cache(maxsize=1)
 def _load_template_text() -> str:

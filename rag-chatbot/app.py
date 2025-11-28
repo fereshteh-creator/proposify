@@ -19,6 +19,10 @@ from prompts import MODE_INSTR, PERSONA_MAP  # optional, for future UI use
 from rag_tools import summarize_uploaded_papers, llm_complete
 from graph_config import AppState, rag_graph
 from proposal_graph_config import ProposalState, proposal_graph #anna
+from proposal_tools import (
+    discover_specialization_examples,
+    load_specialization_example,
+)
 
 # -------- env + Langfuse -------- #
 
@@ -96,6 +100,13 @@ if "mode" not in st.session_state:
     st.session_state.mode = "Research question helper"
 if "persona" not in st.session_state:
     st.session_state.persona = "Helper"
+if "specialization" not in st.session_state:
+    available_specs = list(discover_specialization_examples().keys())
+    st.session_state.specialization = available_specs[0] if available_specs else "General Example"
+if "proposal_example_text" not in st.session_state:
+    st.session_state.proposal_example_text = load_specialization_example(
+        st.session_state.get("specialization", "")
+    )
 if "upload_collection_name" not in st.session_state:
     import uuid
     # kept for backward compatibility / tracing
@@ -210,6 +221,11 @@ def _find_asset(name: str) -> Path | None:
         if path.exists():
             return path
     return None
+
+
+def _update_specialization(choice: str):
+    st.session_state.specialization = choice
+    st.session_state.proposal_example_text = load_specialization_example(choice)
 
 # -------- hero + styling helpers -------- #
 
@@ -373,6 +389,8 @@ def answer_with_rag_and_memory(question: str) -> Dict[str, Any]:
             "context_docs": [],
             "next_step": "",
             "last_task": st.session_state.last_task,
+            "specialization": st.session_state.specialization,
+            "proposal_example": st.session_state.proposal_example_text,
         }
 
         final_state = proposal_graph.invoke(
@@ -468,6 +486,20 @@ def render_onboarding():
                 key="onboarding_mode",
             )
             st.session_state.mode = selected_mode
+
+            if selected_mode == "Proposal refinement assistant":
+                specs = list(discover_specialization_examples().keys())
+                if not specs:
+                    specs = ["General Example"]
+                current_idx = specs.index(st.session_state.specialization) if st.session_state.specialization in specs else 0
+                chosen_spec = st.selectbox(
+                    "Choose your specialization",
+                    specs,
+                    index=current_idx,
+                    help="Pick which proposal example should guide structure/tone for this session.",
+                    key="onboarding_specialization",
+                )
+                _update_specialization(chosen_spec)
 
             cols = st.columns(len(AGENT_OPTIONS))
             for col, option in zip(cols, AGENT_OPTIONS):
@@ -591,6 +623,9 @@ st.session_state.mode = st.sidebar.radio(
     key="mode_select",
     help="Switch between exploring/refining research questions or polishing an existing proposal.",
 )
+
+if st.session_state.mode == "Proposal refinement assistant":
+    pass
 
 st.sidebar.subheader("Answer style")
 persona_options = ["Supervisor", "Helper", "Creative"]

@@ -19,6 +19,7 @@ from proposal_tools import (
     format_paper_summaries,
     format_retrieved_context,
     get_template_outline,
+    load_specialization_example,
 )
 from rag_tools import llm_complete, retrieve_kb_context
 
@@ -36,6 +37,8 @@ class ProposalState(TypedDict):
     context_docs: List[str]
     next_step: str
     last_task: str
+    specialization: str
+    proposal_example: str
 
 
 REFINE_KEYWORDS = [
@@ -154,6 +157,14 @@ def _shorten_for_retrieval(text: str, max_chars: int = 1200) -> str:
     return _truncate_text(text, max_chars)
 
 
+def _get_examples_context(example_text: str, max_chars: int = 4000) -> str:
+    if not example_text:
+        example_text = load_specialization_example("")
+    if not example_text:
+        return "None provided."
+    return example_text
+
+
 def router_node(state: ProposalState) -> ProposalState:
     question = state.get("question", "")
     has_user_context = bool(state.get("paper_summaries")) or state.get("last_task") == "proposal_refine"
@@ -194,6 +205,7 @@ def _route_after_router(state: ProposalState) -> str:
 def proposal_guidance_node(state: ProposalState) -> ProposalState:
     docs, metas = retrieve_kb_context(state["question"], n_results=5)
     context_block = _truncate_text(format_retrieved_context(docs, metas), 2500)
+    examples_block = _get_examples_context(state.get("proposal_example", ""))
     style = _get_style(state.get("persona", "Helper"))
     mode_instr = MODE_INSTR.get(
         "Proposal refinement assistant",
@@ -209,6 +221,8 @@ def proposal_guidance_node(state: ProposalState) -> ProposalState:
         summary=state.get("summary", "None"),
         recent_qas=state.get("recent_qas", "None"),
         context=context_block,
+        specialization=state.get("specialization", "General"),
+        proposal_examples=examples_block,
         question=state.get("question", ""),
     )
 
@@ -228,6 +242,7 @@ def proposal_refine_node(state: ProposalState) -> ProposalState:
     paper_summaries = _truncate_text(
         format_paper_summaries(state.get("paper_summaries", {})), 2500
     )
+    examples_block = _get_examples_context(state.get("proposal_example", ""))
     style = _get_style(state.get("persona", "Helper"))
     mode_instr = MODE_INSTR.get(
         "Proposal refinement assistant",
@@ -244,7 +259,9 @@ def proposal_refine_node(state: ProposalState) -> ProposalState:
         recent_qas=state.get("recent_qas", "None"),
         template_outline=template_outline,
         paper_summaries=paper_summaries,
+        specialization=state.get("specialization", "General"),
         rag_context=rag_context,
+        proposal_examples=examples_block,
         question=state.get("question", ""),
     )
 

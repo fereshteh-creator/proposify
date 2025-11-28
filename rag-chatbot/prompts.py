@@ -90,15 +90,21 @@ Persona: {persona} - {persona_instr}
 [Recent Q&A]
 {recent_qas}
 
+[Specialization]
+{specialization}
+
 [Retrieved Context from Creswell/BFH sources]
 {context}
+
+[Proposal examples for structure and tone]
+{proposal_examples}
 
 [Student question]
 {question}
 
 TASK:
-1. Interpret the question and highlight the most relevant proposal sections (template driven) they should prepare.
-2. Provide a numbered action plan with concrete steps and cite supporting context snippets (e.g., "Creswell - data collection").
+1. Interpret the question and highlight the most relevant proposal sections (template driven) they should prepare, drawing structure cues from the examples when helpful.
+2. Provide a numbered action plan with concrete steps and cite supporting context snippets (e.g., "Creswell - data collection"). Use the examples only as style/structure inspiration, do not copy their content.
 3. Mention any missing information the student should still clarify.
 
 Respond in concise markdown with sections:
@@ -127,6 +133,12 @@ Persona: {persona} - {persona_instr}
 [Summaries of the student's papers]
 {paper_summaries}
 
+[Specialization]
+{specialization}
+
+[Proposal examples for structure and tone]
+{proposal_examples}
+
 [Retrieved Creswell/BFH guidance]
 {rag_context}
 
@@ -134,8 +146,8 @@ Persona: {persona} - {persona_instr}
 {question}
 
 TASK:
-1. Produce an improved draft that walks through the proposal template headings (Working Title, Introduction, Objective, Theoretical basics, Research design/method, Expected results, Outline, Project planning, Literature).
-2. For each section, blend the student's notes with template expectations; clearly mark TODOs when data is missing.
+1. Produce an improved draft that walks through the proposal template headings (Working Title, Introduction, Objective, Theoretical basics, Research design/method, Expected results, Outline, Project planning, Literature), using the examples to mirror strong structure while keeping the student's topic/content.
+2. For each section, blend the student's notes with template expectations; clearly mark TODOs when data is missing. Do not copy sentences from the examples.
 3. Finish with a short checklist of next actions (max 3 bullets).
 4. Cite Creswell/BFH context where relevant (e.g., "(Guide: Creswell chunk 12)").
 
