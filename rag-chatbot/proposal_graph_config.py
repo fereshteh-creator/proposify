@@ -91,7 +91,7 @@ def _normalize_line(line: str) -> str:
 def _wrap_with_highlight(line: str) -> str:
     if "<span" in line:
         return line
-    highlight_tpl = '<span style="color:#74A1BA;"><strong>{}</strong></span>'
+    highlight_tpl = '<span style="color:#991d38ff;"><strong>{}</strong></span>'
 
     heading_match = re.match(r"^(\s*#+\s*)(.*)$", line)
     bullet_match = re.match(r"^(\s*[-*]\s+)(.*)$", line)
@@ -145,6 +145,13 @@ def _truncate_text(text: str, max_chars: int) -> str:
     if len(text) <= max_chars:
         return text
     return text[: max_chars - 3] + "..."
+
+
+def _shorten_for_retrieval(text: str, max_chars: int = 1200) -> str:
+    """
+    Keep retrieval queries compact so embeddings are not dominated by full drafts.
+    """
+    return _truncate_text(text, max_chars)
 
 
 def router_node(state: ProposalState) -> ProposalState:
@@ -214,7 +221,8 @@ def proposal_guidance_node(state: ProposalState) -> ProposalState:
 
 
 def proposal_refine_node(state: ProposalState) -> ProposalState:
-    docs, metas = retrieve_kb_context(state["question"], n_results=4)
+    query = _shorten_for_retrieval(state.get("question", ""))
+    docs, metas = retrieve_kb_context(query, n_results=6, min_bfh=2)
     rag_context = _truncate_text(format_retrieved_context(docs, metas), 2500)
     template_outline = _truncate_text(get_template_outline(), 2000)
     paper_summaries = _truncate_text(
@@ -241,7 +249,26 @@ def proposal_refine_node(state: ProposalState) -> ProposalState:
     )
 
     answer = llm_complete(prompt, max_tokens=1800, temperature=style["temp"])
-    state["answer"] = highlight_changes(state.get("question", ""), answer)
+    highlighted = highlight_changes(state.get("question", ""), answer)
+    # Surface which context was used so the student can see how the draft was refined.
+    used_titles = []
+    seen = set()
+    for meta in metas + TEMPLATE_METADATA:
+        title = (meta.get("quelle") or meta.get("title") or "").strip()
+        if title and title not in seen:
+            seen.add(title)
+            used_titles.append(title)
+    paper_titles = [t.strip() for t in state.get("paper_summaries", {}).keys()]
+    sources_note = ""
+    if used_titles or paper_titles:
+        parts = []
+        if used_titles:
+            parts.append("Guides: " + ", ".join(used_titles))
+        if paper_titles:
+            parts.append("Papers: " + ", ".join(paper_titles))
+        sources_note = "\n\n_Source basis: {}_".format("; ".join(parts))
+
+    state["answer"] = highlighted + sources_note
     state["task"] = "proposal_refine"
     state["metadatas"] = metas + TEMPLATE_METADATA
     state["context_docs"] = docs
