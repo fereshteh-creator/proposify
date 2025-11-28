@@ -17,14 +17,10 @@ If you have a MacOS client or a Linux based system, you have to isntall Docker w
     cd rag-chatbot
  
 ### 2. Add API Key
- 
-Rename the environment file and add your Together.ai API key:
- 
-    mv .env.apiKey .env
- 
-Then edit the .env file and insert your API key:
- 
-TOGETHER_API_KEY=your_actual_api_key_here
+
+Create a `.env` file in the `rag-chatbot` folder and add your BFH LLM API key:
+
+    BFH_LLM_API_KEY=your_actual_api_key_here
 
 **The API Key is found in the report provided on Moodle.**
 
