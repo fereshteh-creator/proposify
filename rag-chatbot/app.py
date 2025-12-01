@@ -625,7 +625,22 @@ st.session_state.mode = st.sidebar.radio(
 )
 
 if st.session_state.mode == "Proposal refinement assistant":
-    pass
+    specs = list(discover_specialization_examples().keys())
+    if not specs:
+        specs = ["General Example"]
+    current_idx = (
+        specs.index(st.session_state.specialization)
+        if st.session_state.specialization in specs
+        else 0
+    )
+    chosen_spec = st.sidebar.selectbox(
+        "Choose your specialization",
+        specs,
+        index=current_idx,
+        help="Pick which proposal example should guide structure/tone for this session.",
+        key="sidebar_specialization",
+    )
+    _update_specialization(chosen_spec)
 
 st.sidebar.subheader("Answer style")
 persona_options = ["Supervisor", "Helper", "Creative"]
