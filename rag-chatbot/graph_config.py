@@ -20,7 +20,7 @@ class AppState(TypedDict):
     persona: str
     summary: str
     recent_qas: str
-    task: str                      # "paper_question" | "structure_question" | "gap_analysis"
+    task: str                      # "paper_question" | "structure_question" | "gap_analysis" | "rq_needs_papers"
     upload_collection_name: str    # kept for tracing / compatibility
 
     # NEW: summaries of uploaded PDFs
@@ -64,6 +64,8 @@ def router_node(state: AppState) -> AppState:
     persona = state.get("persona", "")
     summary = state.get("summary", "")
     recent_qas = state.get("recent_qas", "")
+    paper_summaries = state.get("paper_summaries") or {}
+    num_papers = len(paper_summaries)
 
     # We put all rich context into the *user* message, and keep the system
     # prompt short and strict about the required output format.
@@ -85,8 +87,8 @@ Available agents (choose exactly ONE):
      - "What were the main findings of my uploaded paper?"
 
 2) structure_question
-   - The user is asking about RESEARCH DESIGN, METHODS, or RESEARCH QUESTIONS
-     for their own planned thesis / project.
+   - The user is asking about RESEARCH DESIGN or METHODS for their own planned thesis / project,
+     or they want feedback/critique/refinement on an EXISTING research question they already have.
    - Examples:
      - "Is this a good research question?"
      - "Is my method feasible?"
@@ -96,11 +98,19 @@ Available agents (choose exactly ONE):
 3) gap_analysis
    - The user is asking about RESEARCH GAPS or CONTRIBUTIONS, usually in relation
      to one or more papers or an emerging field.
+   - Also use this when the user wants you to GENERATE or SUGGEST possible research questions
+     that are grounded in the uploaded literature, AND there are at least 3 summarized papers.
    - Examples:
      - "What gaps are still open in these papers?"
      - "What could be the research gap for me to fill?"
      - "Which research gaps do these studies leave?"
      - "What contribution could my thesis make, based on the literature?"
+
+4) rq_needs_papers
+   - The user is asking you to GENERATE or SUGGEST research questions, but there are fewer than
+     3 summarized papers available.
+   - In this case, do NOT route to structure_question: instead choose rq_needs_papers so that
+     the system can ask the user to upload and summarize more papers first.
 
 Context you can use:
 
@@ -116,6 +126,9 @@ Context you can use:
 [Recent Q&A]
 {recent_qas}
 
+[Number of summarized papers available]
+{num_papers}
+
 [User's latest message]
 {user_msg}
 
@@ -124,14 +137,15 @@ Output format:
   paper_question
   structure_question
   gap_analysis
+  rq_needs_papers
 """
 
     resp = llm_service.generate_completion(
         system_prompt=(
             "You are a routing classifier for a thesis assistant. "
-            "Given the detailed description in the user message, "
+            "Given the detailed description in the user message and the context, "
             "respond with exactly ONE of these labels:\n"
-            "- paper_question\n- structure_question\n- gap_analysis\n"
+            "- paper_question\n- structure_question\n- gap_analysis\n- rq_needs_papers\n"
             "No explanation, no punctuation, just the single word."
         ),
         user_prompt=user_prompt,
@@ -139,7 +153,7 @@ Output format:
     )
 
     label = resp["text"].strip().lower()
-    if label not in {"paper_question", "structure_question", "gap_analysis"}:
+    if label not in {"paper_question", "structure_question", "gap_analysis", "rq_needs_papers"}:
         # Safe fallback if the model says something unexpected
         label = "structure_question"
 
@@ -148,7 +162,29 @@ Output format:
 
 
 def router_edge(state: AppState) -> str:
-    return state.get("task", "structure_question")
+    task = state.get("task", "structure_question")
+    if task == "rq_needs_papers":
+        return "rq_needs_papers"
+    return task
+
+
+def rq_needs_papers(state: AppState) -> AppState:
+    """
+    Inform the user that generating research questions requires
+    at least 3 summarized papers first.
+    """
+    summaries = state.get("paper_summaries") or {}
+    num = len(summaries)
+    plural = "s" if num != 1 else ""
+
+    state["answer"] = (
+        "To propose concrete research questions that are grounded in the existing literature, "
+        "I first need summaries of at least 3 relevant papers.\n\n"
+        f"Right now I can see {num} summarized paper{plural}.\n"
+        "Please upload at least 3 PDFs, click 'Summarize uploaded papers', "
+        "and then ask for possible research questions again."
+    )
+    return state
 
 
 # -------------------------------------------------------------------
@@ -598,6 +634,7 @@ def gap_format_answer(state: AppState) -> AppState:
 graph_builder = StateGraph(AppState)
 
 graph_builder.add_node("router", router_node)
+graph_builder.add_node("rq_needs_papers", rq_needs_papers)
 
 # paper pipeline
 graph_builder.add_node("paper_select_scope", paper_select_scope)
@@ -625,6 +662,7 @@ graph_builder.add_conditional_edges(
         "paper_question": "paper_select_scope",
         "structure_question": "methods_parse_request",
         "gap_analysis": "gap_collect_inputs",
+        "rq_needs_papers": "rq_needs_papers",
     },
 )
 

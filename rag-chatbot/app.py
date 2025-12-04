@@ -721,6 +721,10 @@ for item in st.session_state.history:
 frage = st.chat_input("Tell us your thesis topic, research question, or proposal challenge...")
 
 if frage:
+    # Show the user's message immediately, even while the assistant is still thinking.
+    with st.chat_message("user", avatar=USER_AVATAR):
+        st.markdown(frage)
+
     with st.spinner("Thinking..."):
         result = answer_with_rag_and_memory(frage)
         st.session_state.history.append(
