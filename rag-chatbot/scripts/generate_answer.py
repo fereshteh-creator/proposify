@@ -1,5 +1,5 @@
-import requests
 import chromadb
+import requests
 from dotenv import load_dotenv
 
 from llm_service import llm_service
@@ -50,7 +50,7 @@ def main() -> None:
 
     context = "\n\n".join(documents)
 
-    # === Prompt für BFH LLM bauen ===
+    # === Prompt für das LLM bauen ===
     user_prompt = f"""Beantworte die folgende Frage ausschließlich basierend auf dem gegebenen Kontext.
 
 Frage: {question}
@@ -60,8 +60,8 @@ Kontext:
 
 Antwort:"""
 
-    # === Anfrage an BFH LLM senden ===
-    print("Anfrage wird an die BFH LLM gesendet...")
+    # === Anfrage an das LLM senden ===
+    print("Anfrage wird an das LLM gesendet...")
     system_prompt = (
         "Du bist ein hilfreicher Assistent in einem RAG-Chatbot. "
         "Beantworte Fragen ausschließlich basierend auf dem bereitgestellten Kontext."

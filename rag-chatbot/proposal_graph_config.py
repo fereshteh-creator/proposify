@@ -22,6 +22,7 @@ from proposal_tools import (
     load_specialization_example,
 )
 from rag_tools import llm_complete, retrieve_kb_context
+from llm_service import llm_service
 
 
 class ProposalState(TypedDict):
@@ -184,7 +185,17 @@ def router_node(state: ProposalState) -> ProposalState:
         recent_qas=state.get("recent_qas", "None"),
         question=question,
     )
-    decision = llm_complete(prompt, max_tokens=20, temperature=0.0).lower()
+    resp = llm_service.generate_completion(
+        system_prompt=(
+            "You are a routing classifier for a thesis proposal assistant. "
+            "Given the description and context in the user message, respond with "
+            "exactly one lowercase word: guidance or refine."
+        ),
+        user_prompt=prompt,
+        temperature=0.0,
+        model="openai/gpt-oss-120b",
+    )
+    decision = resp.get("text", "").lower()
     next_step = "refine" if "refine" in decision else "guidance"
 
     if next_step == "refine" and not should_force_refine(question, has_user_context):

@@ -9,7 +9,7 @@ They take care of:
 - Formatting uploaded paper summaries so that the proposal agent can reuse them.
 
 All prompts rely on the `llm_complete` helper from `rag_tools`, which in turn
-uses the shared BFH LLM service.
+uses the shared LLM backend (configured via Together AI).
 """
 
 import html

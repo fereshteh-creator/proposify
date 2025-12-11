@@ -16,7 +16,8 @@ COPY . .
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
 ENV STREAMLIT_PORT=8501
-ENV BFH_LLM_API_KEY=your_api_key_here
+# Together API key used by llm_service.py
+ENV TOGETHER_API_KEY=your_together_api_key_here
 
 # Expose Streamlit port
 EXPOSE 8501

@@ -7,7 +7,7 @@ from langgraph.graph import StateGraph, END
 
 from prompts import RAG_SAFETY_PREAMBLE, MODE_INSTR, PERSONA_MAP
 from rag_tools import llm_complete, retrieve_kb_context
-from llm_service import llm_service 
+from llm_service import llm_service
 
 # -------------------------------------------------------------------
 # App state
@@ -24,7 +24,7 @@ class AppState(TypedDict):
     upload_collection_name: str    # kept for tracing / compatibility
 
     # NEW: summaries of uploaded PDFs
-    # filename -> markdown summary (created by BFH LLM at upload time)
+    # filename -> markdown summary (created by the LLM backend at upload time)
     paper_summaries: Dict[str, str]
 
     # which filenames the user explicitly mentioned in the question
@@ -52,7 +52,7 @@ class AppState(TypedDict):
 
 def router_node(state: AppState) -> AppState:
     """
-    LLM-based routing agent using the BFH GPT-OSS model.
+    LLM-based routing agent using the configured backend model.
 
     Decides which specialized pipeline should handle the user's message:
     - paper_question: questions about uploaded papers/articles
@@ -89,6 +89,9 @@ Available agents (choose exactly ONE):
 2) structure_question
    - The user is asking about RESEARCH DESIGN or METHODS for their own planned thesis / project,
      or they want feedback/critique/refinement on an EXISTING research question they already have.
+   - Also choose this when the user asks how to define, improve, or evaluate a good research question
+     (e.g. \"how can I define a good research question?\", \"is this a good research question?\"),
+     without clearly asking you to generate questions for them.
    - Examples:
      - "Is this a good research question?"
      - "Is my method feasible?"
@@ -107,8 +110,11 @@ Available agents (choose exactly ONE):
      - "What contribution could my thesis make, based on the literature?"
 
 4) rq_needs_papers
-   - The user is asking you to GENERATE or SUGGEST research questions, but there are fewer than
-     3 summarized papers available.
+   - The user is clearly asking you to GENERATE or SUGGEST specific research questions for their topic
+     (e.g. \"can you suggest 3 research questions about ...?\", \"give me possible research questions\"),
+     but there are fewer than 3 summarized papers available.
+   - Do NOT choose this when the user only asks for general advice about good research questions or
+     how to write a proposal; in those cases, prefer structure_question.
    - In this case, do NOT route to structure_question: instead choose rq_needs_papers so that
      the system can ask the user to upload and summarize more papers first.
 
@@ -150,6 +156,8 @@ Output format:
         ),
         user_prompt=user_prompt,
         temperature=0.0,
+        # Always use GPT-OSS for routing decisions, regardless of UI model choice.
+        model="openai/gpt-oss-120b",
     )
 
     label = resp["text"].strip().lower()
@@ -374,7 +382,17 @@ User message:
 
 Answer with only one word: critique_design, propose_design, or refine_question.
 """
-    label = llm_complete(prompt, max_tokens=3, temperature=0.0).strip().lower()
+    resp = llm_service.generate_completion(
+        system_prompt=(
+            "You are a routing classifier for thesis methodology questions. "
+            "Read the instructions and the user message carefully, then answer "
+            "with exactly one label: critique_design, propose_design, or refine_question."
+        ),
+        user_prompt=prompt,
+        temperature=0.0,
+        model="openai/gpt-oss-120b",
+    )
+    label = resp.get("text", "").strip().lower()
     if label not in {"critique_design", "propose_design", "refine_question"}:
         label = "critique_design"
     state["methods_task"] = label

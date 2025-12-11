@@ -100,6 +100,9 @@ if "mode" not in st.session_state:
     st.session_state.mode = "Research question helper"
 if "persona" not in st.session_state:
     st.session_state.persona = "Helper"
+if "llm_model" not in st.session_state:
+    # Default backend for new sessions
+    st.session_state.llm_model = "GPT-OSS 120B (Together)"
 if "specialization" not in st.session_state:
     available_specs = list(discover_specialization_examples().keys())
     st.session_state.specialization = available_specs[0] if available_specs else "General Example"
@@ -190,6 +193,17 @@ AGENT_OPTIONS = [
         "label": "Proposal refinement assistant",
         "tagline": "Polish an existing proposal draft.",
         "details": "Best when you already have a structure or draft and need sharper arguments, gaps, or methodology advice.",
+    },
+]
+
+MODEL_OPTIONS = [
+    {
+        "label": "GPT-OSS 120B",
+        "details": "Use the openai/gpt-oss-120b model via Together.",
+    },
+    {
+        "label": "Qwen3 80B",
+        "details": "Use the Qwen/Qwen3-Next-80B-A3B-Instruct model via Together.",
     },
 ]
 
@@ -491,7 +505,11 @@ def render_onboarding():
                 specs = list(discover_specialization_examples().keys())
                 if not specs:
                     specs = ["General Example"]
-                current_idx = specs.index(st.session_state.specialization) if st.session_state.specialization in specs else 0
+                current_idx = (
+                    specs.index(st.session_state.specialization)
+                    if st.session_state.specialization in specs
+                    else 0
+                )
                 chosen_spec = st.selectbox(
                     "Choose your specialization",
                     specs,
@@ -500,6 +518,25 @@ def render_onboarding():
                     key="onboarding_specialization",
                 )
                 _update_specialization(chosen_spec)
+
+            # Model selection for the main LLM backend
+            model_labels = [opt["label"] for opt in MODEL_OPTIONS]
+            current_model_idx = (
+                model_labels.index(st.session_state.llm_model)
+                if st.session_state.llm_model in model_labels
+                else 0
+            )
+            selected_model = st.radio(
+                "Model backend",
+                model_labels,
+                index=current_model_idx,
+                help=(
+                    "Choose which Together-hosted model the assistant should use "
+                    "for answers (GPT-OSS 120B or Qwen3 80B)."
+                ),
+                key="onboarding_model",
+            )
+            st.session_state.llm_model = selected_model
 
             cols = st.columns(len(AGENT_OPTIONS))
             for col, option in zip(cols, AGENT_OPTIONS):
@@ -580,7 +617,19 @@ def render_onboarding():
 
 # -------- UI: sidebar -------- #
 
-st.sidebar.header("Assistant setup")
+
+model_labels = [opt["label"] for opt in MODEL_OPTIONS]
+current_model_idx = (
+    model_labels.index(st.session_state.llm_model)
+    if st.session_state.llm_model in model_labels
+    else 0
+)
+st.session_state.llm_model = st.sidebar.selectbox(
+    "Select a model",
+    model_labels,
+    index=current_model_idx,
+    key="sidebar_model",
+)
 
 st.sidebar.subheader("Upload your papers")
 uploaded_files = st.sidebar.file_uploader(

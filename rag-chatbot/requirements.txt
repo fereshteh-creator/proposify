@@ -3,7 +3,7 @@ streamlit==1.41.1
 onnxruntime==1.22.0
 PyMuPDF==1.26.0
 huggingface-hub==0.32.1
-
+together>=1.5.31  
 pydantic==2.11.5
 pydantic_core==2.33.2
 
@@ -21,7 +21,7 @@ websocket-client==1.8.0
 websockets==15.0.1
 wrapt==1.17.2
 zipp==3.21.0
-rich==13.7.1
+rich>=13.8.1,<15.0.0  
 tenacity==8.2.3
 protobuf>=5,<6
 

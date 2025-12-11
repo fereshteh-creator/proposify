@@ -31,14 +31,14 @@ PERSONA_MAP = {
         ),
     },
     "Helper": {
-        "temp": 0.2,
+        "temp": 0.5,
         "instr": (
             "Guided drafting. Provide structure, step-by-step guidance, short examples, "
             "and concrete next actions."
         ),
     },
     "Creative": {
-        "temp": 0.7,
+        "temp": 1,
         "instr": (
             "Brainstorm innovative topics and angles. Diverge with multiple ideas, then "
             "converge to 2–3 concrete candidates with crisp research questions and "

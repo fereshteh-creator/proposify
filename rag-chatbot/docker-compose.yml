@@ -9,7 +9,7 @@ services:
     volumes:
       - .:/app
     environment:
-      - BFH_LLM_API_KEY=${BFH_LLM_API_KEY}
+      - TOGETHER_API_KEY=${TOGETHER_API_KEY}
       - CHROMA_HOST=chroma
       - CHROMA_PORT=8000
       - OLLAMA_BASE=http://ollama:11434

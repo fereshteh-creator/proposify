@@ -2,14 +2,14 @@
 
 import os
 import time
-from typing import List, Dict, Any
+from typing import Any, Dict, List
 
-import requests
 import chromadb
 import fitz  # PyMuPDF
+import requests
 from dotenv import load_dotenv
 
-from llm_service import llm_service  # BFH LLM wrapper
+from llm_service import llm_service  # Together LLM wrapper
 
 load_dotenv()
 
@@ -48,9 +48,10 @@ BFH_SOURCES = [
 # LLM helper for router, methods & gap pipelines
 # --------------------------------------------------------------------
 
+
 def llm_complete(prompt: str, max_tokens: int = 1024, temperature: float = 0.2) -> str:
     """
-    Call the BFH LLM via the shared `llm_service` wrapper.
+    Call the configured Together LLM via the shared `llm_service` wrapper.
 
     This keeps a simple text-in / text-out interface that is used by the
     LangGraph pipelines (router, methods, gap, memory summariser).
@@ -212,14 +213,15 @@ def retrieve_kb_context(question: str, n_results: int = 5, min_bfh: int = 0):
 
 
 # --------------------------------------------------------------------
-# Full-paper summarization with BFH LLM (gpt-oss:120b)
+# Full-paper summarization with the LLM backend
 # --------------------------------------------------------------------
+
 
 def _extract_full_text_from_pdf(data: bytes) -> str:
     """
     Read the entire PDF (bytes) and return plain text from all pages.
 
-    A soft character cap is applied to keep within the BFH LLM context window.
+    A soft character cap is applied to keep within the LLM context window.
     """
     with fitz.open(stream=data, filetype="pdf") as doc:
         pages = [page.get_text() for page in doc]
@@ -235,10 +237,9 @@ def _extract_full_text_from_pdf(data: bytes) -> str:
     return full_text
 
 
-def summarize_single_paper_with_bfh_llm(title: str, full_text: str) -> str:
+def _summarize_single_paper_with_llm(title: str, full_text: str) -> str:
     """
-    Use the BFH LLM (ollama/gpt-oss:120b) to produce a structured summary
-    of one paper.
+    Use the configured LLM backend to produce a structured summary of one paper.
 
     The summary extracts:
     - Topic / problem
@@ -296,7 +297,7 @@ If a subsection is not covered in the text, write "not specified in text" for th
 
 def summarize_uploaded_papers(files) -> Dict[str, str]:
     """
-    Summarize each uploaded PDF with the BFH LLM.
+    Summarize each uploaded PDF with the configured LLM backend.
 
     Args:
         files: list of Streamlit UploadedFile-like objects.
@@ -313,7 +314,7 @@ def summarize_uploaded_papers(files) -> Dict[str, str]:
 
         title = getattr(f, "name", "uploaded_paper.pdf")
         full_text = _extract_full_text_from_pdf(data)
-        summary = summarize_single_paper_with_bfh_llm(title, full_text)
+        summary = _summarize_single_paper_with_llm(title, full_text)
         summaries[title] = summary
 
     return summaries
