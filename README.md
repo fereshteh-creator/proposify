@@ -55,7 +55,7 @@ You should see logs like:
 
 Import abgeschlossen: 640 Embeddings in Chroma (Server-Modus))
 
-Those steps are importanant, otherwise the bot will not function correctly!
+Those steps are importannt, otherwise the bot will not function correctly!
  
 ### 5. Use the App
  
