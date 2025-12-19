@@ -1,6 +1,6 @@
-# proposify
+# Proposify
 
-This document describes how the RAG application in this repository must be set up correctly and what preparations must be made.
+This document describes how the Proposify application in this repository must be set up correctly and what preparations must be made.
 
 ## Prerequisites
 * In order to run the application with Docker, you need to install Docker Desktop on Windows systems. 
@@ -83,9 +83,8 @@ And then:
 
     python visualize_graph.py
 
-And wenn finished `exit` or `Crt+D` btw. can also look at the png
+And when finished `exit` or `Crt+D` and look at the png graph.
 
-### dont forget to turn on the vpn
 
 ### langfuse for debugging and tracking
 
